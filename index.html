@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chiron+GoRound+TC:wght@200;300;400;500;600;700;800;900&family=Nunito:wght@400;500;600;700;800;900&family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<!-- 匯出穩定性：Nunito 900 + Jost 500 用本地 data URI 內嵌，保證 SVG foreignObject 抓得到 -->
+<link rel="stylesheet" href="./fonts/fonts-embedded.css">
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -31,6 +33,8 @@ input[type=color] { -webkit-appearance: none; border: none; padding: 0; width: 3
 input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
 input[type=color]::-webkit-color-swatch { border: 1px solid #e7e5e4; border-radius: 4px; }
 select { appearance: none; -webkit-appearance: none; background: #fff; border: 1px solid #e7e5e4; border-radius: 6px; padding: 4px 22px 4px 8px; font-size: 11px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%235E5453'><path d='M5.5 8l4.5 4.5L14.5 8z'/></svg>"); background-repeat: no-repeat; background-position: right 4px center; background-size: 14px; cursor: pointer; }
+/* 匯出修正：Tailwind Preflight 的 border-style:solid + width:0 在 SVG foreignObject 內會被瀏覽器渲染成 1 device px 細線，導致下載 PNG 每個 element 都有外框。強制關掉 */
+.ofp-export, .ofp-export *, .ofp-export *::before, .ofp-export *::after { border-width: 0 !important; border-style: none !important; }
 </style>
 </head>
 <body class="bg-stone-100 min-h-screen">
@@ -124,7 +128,8 @@ async function exportToPng(node, opts) {
       return await window.modernScreenshot.domToPng(node, {
         width, height, scale,
         backgroundColor: null,
-        font: { cssText: '' },  // 使用頁面現有字型
+        // 不覆寫 font 選項，讓 modern-screenshot 自動把 @font-face（含 Google Fonts）內嵌到 SVG，
+        // 避免 Nunito / Jost 在 foreignObject 內取不到實際字型檔、用 synthetic bold 描粗造成邊緣模糊
       });
     } catch (e) {
       console.warn('modern-screenshot failed, trying dom-to-image', e);
@@ -182,12 +187,12 @@ function BrandFooter({ palette, pageNum, dark, data, tpl, logos }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <img src={logo} alt="logo" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
-          <span style={{ fontFamily: fontFamily(footerFont), fontSize: footerSize, fontWeight: footerWeight, color: textColor, letterSpacing: '0.03em' }}>
+          <span style={{ fontFamily: fontFamily(footerFont), fontSize: footerSize, fontWeight: footerWeight, color: textColor, letterSpacing: '0.03em', whiteSpace: 'nowrap' }}>
             歐的樂星球
           </span>
         </div>
         {pageNum && (
-          <span style={{ fontFamily: fontFamily(pageNumFont), fontSize: pageNumSize, fontWeight: pageNumWeight, color: textColor, opacity: 0.78, letterSpacing: '0.15em' }}>
+          <span style={{ fontFamily: fontFamily(pageNumFont), fontSize: pageNumSize, fontWeight: pageNumWeight, color: textColor, opacity: 0.78, letterSpacing: '0.15em', whiteSpace: 'nowrap' }}>
             {pageNum}
           </span>
         )}
@@ -585,10 +590,26 @@ function App() {
     });
   };
 
+  const [maxPreview, setMaxPreview] = useState({ w: 520, h: 700 });
+  useEffect(() => {
+    const update = () => {
+      const isDesktop = window.innerWidth >= 768;
+      // 手機：扣 main padding 32px；桌面：扣 sidebar 380 + padding 80px
+      const maxW = isDesktop
+        ? Math.min(520, window.innerWidth - 380 - 80)
+        : window.innerWidth - 24;
+      const maxH = isDesktop
+        ? Math.min(700, window.innerHeight - 200)
+        : Math.floor(window.innerHeight * 0.55);
+      setMaxPreview({ w: Math.max(240, maxW), h: Math.max(300, maxH) });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
   const previewScale = useMemo(() => {
-    const maxW = 520, maxH = 700;
-    return Math.min(maxW / size.w, maxH / size.h);
-  }, [size]);
+    return Math.min(maxPreview.w / size.w, maxPreview.h / size.h);
+  }, [size, maxPreview]);
 
   const handleExport = async () => {
     if (!canvasRef.current) return;
@@ -810,31 +831,31 @@ function App() {
 
   return (
     <div className="min-h-screen" style={{ background: C.subBg }}>
-      <header className="px-8 py-5 bg-white border-b flex items-center justify-between sticky top-0 z-10" style={{ borderColor: '#e7e5e4' }}>
-        <div className="flex items-baseline gap-3">
-          <span className="text-xl font-bold" style={{ color: C.brown }}>歐的樂星球</span>
-          <span className="text-xs uppercase tracking-widest" style={{ color: C.rosePink }}>Carousel Kit v3.3</span>
+      <header className="px-3 md:px-8 py-2 md:py-5 bg-white border-b flex items-center justify-between gap-2 sticky top-0 z-10" style={{ borderColor: '#e7e5e4' }}>
+        <div className="flex items-baseline gap-2 md:gap-3 min-w-0">
+          <span className="text-sm md:text-xl font-bold truncate" style={{ color: C.brown }}>歐的樂星球</span>
+          <span className="hidden md:inline text-xs uppercase tracking-widest" style={{ color: C.rosePink }}>Carousel Kit v3.3</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
           {Object.entries(SIZES).map(([k, s]) => (
             <button key={k} onClick={() => setSizeKey(k)}
-              className="px-4 py-1.5 text-sm rounded-full transition"
+              className="px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm rounded-full transition"
               style={{
                 background: sizeKey === k ? C.brown : C.subBg,
                 color: sizeKey === k ? '#fff' : C.brown,
               }}>{s.label}</button>
           ))}
-          <div className="w-px h-6 mx-2" style={{ background: '#e7e5e4' }} />
+          <div className="hidden md:block w-px h-6 mx-2" style={{ background: '#e7e5e4' }} />
           <button onClick={handleExport} disabled={exporting}
-            className="px-5 py-2 text-sm font-bold rounded-full text-white disabled:opacity-50 transition"
+            className="px-3 md:px-5 py-1.5 md:py-2 text-xs md:text-sm font-bold rounded-full text-white disabled:opacity-50 transition whitespace-nowrap"
             style={{ background: C.orange }}>
-            {exporting ? '匯出中…' : '↓ 下載 PNG'}
+            {exporting ? '匯出中…' : '↓ PNG'}
           </button>
         </div>
       </header>
 
-      <div className="flex" style={{ minHeight: 'calc(100vh - 68px)' }}>
-        <aside className="w-[380px] p-6 bg-white border-r overflow-y-auto no-scrollbar" style={{ maxHeight: 'calc(100vh - 68px)', borderColor: '#e7e5e4' }}>
+      <div className="flex flex-col-reverse md:flex-row" style={{ minHeight: 'calc(100vh - 68px)' }}>
+        <aside className="w-full md:w-[380px] p-4 md:p-6 bg-white md:border-r border-t md:border-t-0 md:overflow-y-auto no-scrollbar md:max-h-[calc(100vh-68px)]" style={{ borderColor: '#e7e5e4' }}>
           <div className="mb-6">
             <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: C.brown }}>版型</div>
             <div className="grid grid-cols-3 gap-2">
@@ -918,7 +939,7 @@ function App() {
           </div>
         </aside>
 
-        <main className="flex-1 flex items-center justify-center p-10">
+        <main className="flex-1 flex items-center justify-center px-3 py-3 md:p-10 sticky top-[41px] md:static z-[5]" style={{ background: C.subBg }}>
           <div className="rounded-2xl overflow-hidden shadow-xl border"
             style={{
               width: size.w * previewScale,
@@ -927,6 +948,7 @@ function App() {
               position: 'relative',
             }}>
             <div ref={canvasRef}
+              className="ofp-export"
               style={{
                 transform: `scale(${previewScale})`,
                 transformOrigin: 'top left',
