@@ -1,0 +1,15 @@
+.DS_Store
+*.log
+.env
+.env.local
+
+# 授權未明字型（勿公開）
+fonts/Soomedium-Regular.ttf
+
+# 本機啟動腳本（部署後不需要）
+啟動套版工具.command
+
+# 編輯器
+.vscode/
+.idea/
+*.swp
