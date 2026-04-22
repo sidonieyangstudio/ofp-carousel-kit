@@ -156,13 +156,13 @@ async function exportToPng(node, opts) {
 
 const DEFAULTS = {
   cover: { contentOffsetY: 0,    chipSize: 32, titleSize: 170, titleSize_1x1: 150, subtitleSize: 40, hintSize: 34, buttonBgOpacity: 0.3,
-           chipFont: 'huninn', titleFont: 'huninn', subtitleFont: 'huninn', hintFont: 'huninn', pageNumFont: 'jost',
+           chipFont: 'chiron', titleFont: 'chiron', subtitleFont: 'chiron', hintFont: 'chiron', pageNumFont: 'jost',
            chipWeight: 500, titleWeight: 900, subtitleWeight: 400, hintWeight: 500 },
   inner: { contentOffsetY: -400, numberSize: 280, chipSize: 30, titleSize: 92, bodySize: 38, footerTextSize: 30, pageNumSize: 28,
-           numberFont: 'huninn', chipFont: 'huninn', titleFont: 'huninn', bodyFont: 'huninn', footerFont: 'huninn', pageNumFont: 'jost',
+           numberFont: 'chiron', chipFont: 'chiron', titleFont: 'chiron', bodyFont: 'chiron', footerFont: 'chiron', pageNumFont: 'jost',
            numberWeight: 900, chipWeight: 500, titleWeight: 900, bodyWeight: 400, footerWeight: 500, pageNumWeight: 500 },
   cta:   { contentOffsetY: 280,  decorSize: 380, decorOpacity: 0.22, decorTop: 180, titleSize: 130, bodySize: 44, taglineSize: 34, buttonSize: 38, buttonBgOpacity: 0.5, footerTextSize: 30, pageNumSize: 28,
-           decorFont: 'nunito', titleFont: 'huninn', bodyFont: 'huninn', taglineFont: 'huninn', buttonFont: 'huninn', footerFont: 'huninn', pageNumFont: 'jost',
+           decorFont: 'nunito', titleFont: 'chiron', bodyFont: 'chiron', taglineFont: 'chiron', buttonFont: 'chiron', footerFont: 'chiron', pageNumFont: 'jost',
            decorWeight: 900, titleWeight: 900, bodyWeight: 400, taglineWeight: 400, buttonWeight: 500, footerWeight: 500, pageNumWeight: 500 },
 };
 
@@ -466,7 +466,7 @@ function CTACard({ data, size, palette, logos }) {
 
 const TEMPLATES = {
   cover: { name: 'Cover 封面', component: CoverCard, defaultPalette: '經典橘' },
-  inner: { name: '內頁',       component: InnerCard, defaultPalette: '奶白' },
+  inner: { name: '內頁',       component: InnerCard, defaultPalette: '經典橘' },
   cta:   { name: 'CTA 行動頁', component: CTACard,   defaultPalette: '經典橘' },
 };
 
@@ -481,7 +481,7 @@ const DEFAULT_DATA = {
     chip: '小遊戲 · 3 分鐘', pageNum: '02 / 06',
     number: '01', title: '用手指當小火車',
     body: '讓孩子的手指先走過那一行，\n眼睛才跟上。\n幾天之後，手指可以拿掉了。',
-    palette: '奶白', overridesByPalette: {},
+    palette: '經典橘', overridesByPalette: {},
   },
   cta: {
     pageNum: '06 / 06', decor: 'READ',
