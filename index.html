@@ -664,6 +664,84 @@ function App() {
     setBatchUrls([]);
   };
 
+  // 批次上雲 helper：直接 POST Cloudinary REST API（不用 Widget 彈框）
+  const uploadOneToCloudinary = async (blob, fileName) => {
+    const formData = new FormData();
+    formData.append('file', blob, fileName);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    formData.append('folder', 'social-publisher/ofp-images');
+    const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Cloudinary HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    return data.secure_url;
+  };
+
+  // 批次上雲（階段 D-3）
+  const uploadAllToCloudinary = async () => {
+    if (pages.length === 0) return;
+    if (!unlocked) { alert('請先輸入管理員密碼解鎖'); return; }
+    if (!CLOUD_UPLOAD_READY) { alert('雲端未設定：config.js 缺項'); return; }
+    setBatchUploading(true);
+    setBatchUrls([]);
+    const originalIdx = currentPageIdx;
+    const collected = [];
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(i);
+        await new Promise(r => setTimeout(r, 800));
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+
+        const node = canvasRef.current;
+        if (!node) throw new Error(`第 ${i + 1} 頁 canvas 未準備好`);
+        const originalTransform = node.style.transform;
+        const originalTransformOrigin = node.style.transformOrigin;
+        node.style.transform = 'none';
+        node.style.transformOrigin = 'top left';
+        await new Promise(r => setTimeout(r, 200));
+        const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
+        node.style.transform = originalTransform;
+        node.style.transformOrigin = originalTransformOrigin;
+
+        const blob = await (await fetch(dataUrl)).blob();
+        if (blob.size > 5 * 1024 * 1024) {
+          throw new Error(`第 ${i + 1} 頁 ${(blob.size/1024/1024).toFixed(2)}MB > 5MB 上限`);
+        }
+        const numStr = String(i + 1).padStart(2, '0');
+        const fileName = `OFP_p${numStr}_${page.template}_${sizeKey.replace(':','x')}_${Date.now()}.png`;
+        const url = await uploadOneToCloudinary(blob, fileName);
+        collected.push(url);
+        setBatchUrls([...collected]); // 即時更新 UI
+      }
+      alert(`✓ 全部 ${pages.length} 頁上傳完成`);
+    } catch (err) {
+      console.error('批次上傳失敗', err);
+      alert(`批次上傳第 ${collected.length + 1} 頁失敗：${err.message || err}\n已成功 ${collected.length} 頁。`);
+    } finally {
+      setBatchUploading(false);
+      if (originalIdx >= 0 && pages[originalIdx]) {
+        const page = pages[originalIdx];
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(originalIdx);
+      }
+    }
+  };
+
+  const copyAllUrls = () => {
+    if (batchUrls.length === 0) return;
+    navigator.clipboard.writeText(batchUrls.join('\n'));
+    alert(`已複製 ${batchUrls.length} 個 URL 到剪貼簿`);
+  };
+
   // 批次匯出 PNG（階段 D-2）
   const exportAllPng = async () => {
     if (pages.length === 0) return;
@@ -1172,16 +1250,50 @@ function App() {
               </div>
             )}
             {pages.length > 0 && (
-              <div className="flex gap-2 mt-3 pt-3 border-t" style={{ borderColor: '#f1ece8' }}>
-                <button onClick={exportAllPng} disabled={batchExporting || batchUploading}
-                  className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg transition"
-                  style={{
-                    background: C.brown, color: '#fff',
-                    opacity: (batchExporting || batchUploading) ? 0.5 : 1,
-                    cursor: (batchExporting || batchUploading) ? 'not-allowed' : 'pointer',
-                  }}>
-                  {batchExporting ? `匯出中… (${pages.length})` : `↓ 全部 PNG (${pages.length})`}
-                </button>
+              <div className="mt-3 pt-3 border-t space-y-2" style={{ borderColor: '#f1ece8' }}>
+                <div className="flex gap-2">
+                  <button onClick={exportAllPng} disabled={batchExporting || batchUploading}
+                    className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg transition"
+                    style={{
+                      background: C.brown, color: '#fff',
+                      opacity: (batchExporting || batchUploading) ? 0.5 : 1,
+                      cursor: (batchExporting || batchUploading) ? 'not-allowed' : 'pointer',
+                    }}>
+                    {batchExporting ? `匯出中… (${pages.length})` : `↓ 全部 PNG (${pages.length})`}
+                  </button>
+                  {unlocked && (
+                    <button onClick={uploadAllToCloudinary} disabled={batchExporting || batchUploading}
+                      className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg transition"
+                      style={{
+                        background: C.orange, color: '#fff',
+                        opacity: (batchExporting || batchUploading) ? 0.5 : 1,
+                        cursor: (batchExporting || batchUploading) ? 'not-allowed' : 'pointer',
+                      }}>
+                      {batchUploading ? `上雲中… (${batchUrls.length}/${pages.length})` : `↑ 全部上雲 (${pages.length})`}
+                    </button>
+                  )}
+                </div>
+                {batchUrls.length > 0 && (
+                  <div className="rounded-lg p-2" style={{ background: C.subBg }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-semibold" style={{ color: C.brown }}>
+                        ✓ 已上傳 {batchUrls.length} 個 URL
+                      </span>
+                      <button onClick={copyAllUrls}
+                        className="px-2 py-0.5 text-[10px] font-semibold rounded-full transition"
+                        style={{ background: C.orange, color: '#fff' }}>
+                        複製全部
+                      </button>
+                    </div>
+                    <div className="space-y-0.5 max-h-32 overflow-y-auto no-scrollbar">
+                      {batchUrls.map((url, i) => (
+                        <div key={i} className="text-[10px] truncate font-mono" style={{ color: C.brown }} title={url}>
+                          #{String(i + 1).padStart(2, '0')} {url}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
