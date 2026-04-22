@@ -591,13 +591,18 @@ function App() {
   const palette = PALETTES[data.palette] || PALETTES['經典橘'];
   const Component = template.component;
 
+  // 雙寫防呆：currentPageIdx 必須有效 + pages[idx].template 必須等於目前 templateKey
+  // 否則切版型後改欄位會汙染原本綁定的頁面（2026-04-22 v2 修）
+  const isCurrentPageEditable = () =>
+    currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template === templateKey;
+
   const updateField = (field, value) => {
     setAllData(prev => ({ ...prev, [templateKey]: { ...prev[templateKey], [field]: value } }));
-    // 2026-04-22 修：currentPageIdx >= 0 時同步寫入 pages[currentPageIdx]，不需手動按「覆寫」
-    if (currentPageIdx >= 0) {
+    if (isCurrentPageEditable()) {
       setPages(prev => {
         if (currentPageIdx < 0 || currentPageIdx >= prev.length) return prev;
         const cur = prev[currentPageIdx];
+        if (cur.template !== templateKey) return prev; // 再次保險
         const next = [...prev];
         next[currentPageIdx] = { ...cur, data: { ...cur.data, [field]: value } };
         return next;
@@ -612,11 +617,11 @@ function App() {
       byPal[p] = { ...(byPal[p] || {}), [field]: value };
       return { ...prev, [templateKey]: { ...cur, overridesByPalette: byPal } };
     });
-    // 同步到 pages[currentPageIdx]
-    if (currentPageIdx >= 0) {
+    if (isCurrentPageEditable()) {
       setPages(prev => {
         if (currentPageIdx < 0 || currentPageIdx >= prev.length) return prev;
         const cur = prev[currentPageIdx];
+        if (cur.template !== templateKey) return prev;
         const palette = cur.data.palette;
         const byPal = { ...(cur.data.overridesByPalette || {}) };
         byPal[palette] = { ...(byPal[palette] || {}), [field]: value };
@@ -634,10 +639,11 @@ function App() {
       byPal[p] = {};
       return { ...prev, [templateKey]: { ...cur, overridesByPalette: byPal } };
     });
-    if (currentPageIdx >= 0) {
+    if (isCurrentPageEditable()) {
       setPages(prev => {
         if (currentPageIdx < 0 || currentPageIdx >= prev.length) return prev;
         const cur = prev[currentPageIdx];
+        if (cur.template !== templateKey) return prev;
         const palette = cur.data.palette;
         const byPal = { ...(cur.data.overridesByPalette || {}) };
         byPal[palette] = {};
@@ -645,6 +651,14 @@ function App() {
         next[currentPageIdx] = { ...cur, data: { ...cur.data, overridesByPalette: byPal } };
         return next;
       });
+    }
+  };
+
+  // 切版型按鈕的包裝：切到不同 template 時自動脫離正在編輯的頁面（防雙寫汙染）
+  const handleSetTemplateKey = (key) => {
+    setTemplateKey(key);
+    if (currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template !== key) {
+      setCurrentPageIdx(-1);
     }
   };
 
@@ -1284,10 +1298,16 @@ function App() {
               style={{ background: C.orange, color: '#fff' }}>
               + 加新頁（目前畫面複製成新頁面）
             </button>
-            {currentPageIdx >= 0 && pages.length > 0 && (
+            {pages.length > 0 && currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template === templateKey && (
+              <div className="text-[10px] text-center py-1 mb-2 rounded"
+                style={{ background: C.orange, color: '#fff' }}>
+                ✦ 編輯中：第 {currentPageIdx + 1} 頁（輸入直接存進該頁）
+              </div>
+            )}
+            {pages.length > 0 && (currentPageIdx < 0 || (pages[currentPageIdx] && pages[currentPageIdx].template !== templateKey)) && (
               <div className="text-[10px] text-center py-1 mb-2 rounded"
                 style={{ background: C.subBg, color: C.brown }}>
-                ✦ 編輯中：第 {currentPageIdx + 1} 頁（輸入直接存進該頁）
+                ⚈ 未綁定頁面｜按「+ 加新頁」加入清單，或下方點頁面繼續編輯
               </div>
             )}
             {pages.length > 0 && (
@@ -1381,7 +1401,7 @@ function App() {
             <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: C.brown }}>版型</div>
             <div className="grid grid-cols-3 gap-2">
               {Object.entries(TEMPLATES).map(([k, t]) => (
-                <button key={k} onClick={() => setTemplateKey(k)}
+                <button key={k} onClick={() => handleSetTemplateKey(k)}
                   className="px-3 py-2.5 text-xs font-semibold rounded-lg transition"
                   style={{
                     background: templateKey === k ? C.brown : C.subBg,
