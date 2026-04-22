@@ -742,6 +742,50 @@ function App() {
     alert(`已複製 ${batchUrls.length} 個 URL 到剪貼簿`);
   };
 
+  // 階段 E：產出本機分享網址（給 push-social-to-notion 寫入 Notion 用）
+  const buildShareUrl = () => {
+    if (pages.length === 0) return '';
+    const payload = { pages: pages.map(p => ({ template: p.template, data: p.data })) };
+    const json = JSON.stringify(payload);
+    const b64 = btoa(unescape(encodeURIComponent(json))); // UTF-8 safe
+    const baseUrl = window.location.href.split('?')[0];
+    return `${baseUrl}?d=${b64}`;
+  };
+  const copyShareUrl = () => {
+    const url = buildShareUrl();
+    if (!url) { alert('清單是空的'); return; }
+    navigator.clipboard.writeText(url);
+    alert(`預填網址已複製（${url.length} 字元）`);
+  };
+
+  // 階段 E：啟動時解析 URL 參數 ?d=<base64> 自動載入 pages
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dParam = params.get('d');
+    if (!dParam) return;
+    try {
+      const json = decodeURIComponent(escape(atob(dParam)));
+      const decoded = JSON.parse(json);
+      if (!Array.isArray(decoded.pages)) return;
+      const validPages = decoded.pages
+        .filter(p => p && p.template && TEMPLATES[p.template] && p.data && typeof p.data === 'object')
+        .map(p => ({
+          template: p.template,
+          data: { ...DEFAULT_DATA[p.template], ...p.data, overridesByPalette: p.data.overridesByPalette || {} },
+        }));
+      if (validPages.length === 0) return;
+      const renumbered = renumberInnerPages(validPages);
+      setPages(renumbered);
+      const first = renumbered[0];
+      setTemplateKey(first.template);
+      setAllData(prev => ({ ...prev, [first.template]: JSON.parse(JSON.stringify(first.data)) }));
+      setCurrentPageIdx(0);
+      console.log(`[OFP] URL 預填載入 ${renumbered.length} 頁`);
+    } catch (e) {
+      console.warn('[OFP] URL 預填解析失敗:', e);
+    }
+  }, []); // 只在初始化跑一次
+
   // 批次匯出 PNG（階段 D-2）
   const exportAllPng = async () => {
     if (pages.length === 0) return;
@@ -1273,6 +1317,12 @@ function App() {
                     </button>
                   )}
                 </div>
+                <button onClick={copyShareUrl}
+                  className="w-full px-3 py-1.5 text-[11px] font-medium rounded-lg transition border"
+                  style={{ background: '#fff', color: C.brown, borderColor: '#e7e5e4' }}
+                  title="複製能還原此清單的網址（給橡果/push-social-to-notion 用）">
+                  ⧉ 複製預填網址（含全部 {pages.length} 頁）
+                </button>
                 {batchUrls.length > 0 && (
                   <div className="rounded-lg p-2" style={{ background: C.subBg }}>
                     <div className="flex items-center justify-between mb-1">
