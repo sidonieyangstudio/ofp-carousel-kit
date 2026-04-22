@@ -664,6 +664,55 @@ function App() {
     setBatchUrls([]);
   };
 
+  // 批次匯出 PNG（階段 D-2）
+  const exportAllPng = async () => {
+    if (pages.length === 0) return;
+    setBatchExporting(true);
+    const originalIdx = currentPageIdx;
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        // 載入該頁進編輯區（觸發 React re-render）
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(i);
+        // 等 React commit + 字型載入
+        await new Promise(r => setTimeout(r, 800));
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+
+        const node = canvasRef.current;
+        if (!node) throw new Error(`第 ${i + 1} 頁 canvas 未準備好`);
+        const originalTransform = node.style.transform;
+        const originalTransformOrigin = node.style.transformOrigin;
+        node.style.transform = 'none';
+        node.style.transformOrigin = 'top left';
+        await new Promise(r => setTimeout(r, 200));
+        const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
+        node.style.transform = originalTransform;
+        node.style.transformOrigin = originalTransformOrigin;
+
+        const numStr = String(i + 1).padStart(2, '0');
+        const link = document.createElement('a');
+        link.download = `OFP_p${numStr}_${page.template}_${sizeKey.replace(':','x')}_${Date.now()}.png`;
+        link.href = dataUrl;
+        link.click();
+        await new Promise(r => setTimeout(r, 400)); // 給瀏覽器喘息
+      }
+    } catch (err) {
+      console.error('批次匯出失敗', err);
+      alert('批次匯出失敗：' + (err.message || err));
+    } finally {
+      setBatchExporting(false);
+      // 恢復原本選的頁
+      if (originalIdx >= 0 && pages[originalIdx]) {
+        const page = pages[originalIdx];
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(originalIdx);
+      }
+    }
+  };
+
   const [maxPreview, setMaxPreview] = useState({ w: 520, h: 700 });
   useEffect(() => {
     const update = () => {
@@ -1120,6 +1169,19 @@ function App() {
             {pages.length === 0 && (
               <div className="text-[11px] text-center py-2" style={{ color: '#a8a29e' }}>
                 編輯目前畫面 → 按「+ 加新頁」加入清單
+              </div>
+            )}
+            {pages.length > 0 && (
+              <div className="flex gap-2 mt-3 pt-3 border-t" style={{ borderColor: '#f1ece8' }}>
+                <button onClick={exportAllPng} disabled={batchExporting || batchUploading}
+                  className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg transition"
+                  style={{
+                    background: C.brown, color: '#fff',
+                    opacity: (batchExporting || batchUploading) ? 0.5 : 1,
+                    cursor: (batchExporting || batchUploading) ? 'not-allowed' : 'pointer',
+                  }}>
+                  {batchExporting ? `匯出中… (${pages.length})` : `↓ 全部 PNG (${pages.length})`}
+                </button>
               </div>
             )}
           </div>
