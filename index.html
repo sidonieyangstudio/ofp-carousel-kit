@@ -456,6 +456,7 @@ function CTACard({ data, size, palette, logos }) {
             color: buttonText,
             padding: '28px 56px', borderRadius: 999,
             fontSize: buttonSize, fontWeight: buttonWeight, border: 'none',
+            whiteSpace: 'nowrap',
           }}>{data.button}</button>
         )}
       </div>
@@ -757,7 +758,9 @@ function App() {
         setTemplateKey(page.template);
         setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
         setCurrentPageIdx(i);
-        await new Promise(r => setTimeout(r, 800));
+        // 等待 React commit + layout + paint 完成（raf 雙層 + 1200ms 緩衝；首次 iter 特別給更多時間）
+        await new Promise(r => setTimeout(r, i === 0 ? 1500 : 1200));
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
         if (document.fonts && document.fonts.ready) await document.fonts.ready;
 
         const node = canvasRef.current;
