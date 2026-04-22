@@ -587,36 +587,32 @@ function App() {
 
   const template = TEMPLATES[templateKey];
   const size = SIZES[sizeKey];
-  const data = allData[templateKey];
+  // 2026-04-22 v3 清潔版：選了頁就直接用 pages[idx].data 渲染（單一 source of truth），
+  // 沒選頁才用 allData。這樣編輯絕對不會汙染別頁。
+  const isBoundToPage = currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template === templateKey;
+  const data = isBoundToPage ? pages[currentPageIdx].data : allData[templateKey];
   const palette = PALETTES[data.palette] || PALETTES['經典橘'];
   const Component = template.component;
 
-  // 雙寫防呆：currentPageIdx 必須有效 + pages[idx].template 必須等於目前 templateKey
-  // 否則切版型後改欄位會汙染原本綁定的頁面（2026-04-22 v2 修）
+  // 2026-04-22 v3 清潔版：單一 source of truth。綁定時寫 pages[idx].data；未綁定時寫 allData[templateKey]。
   const isCurrentPageEditable = () =>
     currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template === templateKey;
 
   const updateField = (field, value) => {
-    setAllData(prev => ({ ...prev, [templateKey]: { ...prev[templateKey], [field]: value } }));
     if (isCurrentPageEditable()) {
       setPages(prev => {
         if (currentPageIdx < 0 || currentPageIdx >= prev.length) return prev;
         const cur = prev[currentPageIdx];
-        if (cur.template !== templateKey) return prev; // 再次保險
+        if (cur.template !== templateKey) return prev;
         const next = [...prev];
         next[currentPageIdx] = { ...cur, data: { ...cur.data, [field]: value } };
         return next;
       });
+    } else {
+      setAllData(prev => ({ ...prev, [templateKey]: { ...prev[templateKey], [field]: value } }));
     }
   };
   const updateOverride = (field, value) => {
-    setAllData(prev => {
-      const cur = prev[templateKey];
-      const p = cur.palette;
-      const byPal = { ...(cur.overridesByPalette || {}) };
-      byPal[p] = { ...(byPal[p] || {}), [field]: value };
-      return { ...prev, [templateKey]: { ...cur, overridesByPalette: byPal } };
-    });
     if (isCurrentPageEditable()) {
       setPages(prev => {
         if (currentPageIdx < 0 || currentPageIdx >= prev.length) return prev;
@@ -629,16 +625,17 @@ function App() {
         next[currentPageIdx] = { ...cur, data: { ...cur.data, overridesByPalette: byPal } };
         return next;
       });
+    } else {
+      setAllData(prev => {
+        const cur = prev[templateKey];
+        const p = cur.palette;
+        const byPal = { ...(cur.overridesByPalette || {}) };
+        byPal[p] = { ...(byPal[p] || {}), [field]: value };
+        return { ...prev, [templateKey]: { ...cur, overridesByPalette: byPal } };
+      });
     }
   };
   const resetOverrides = () => {
-    setAllData(prev => {
-      const cur = prev[templateKey];
-      const p = cur.palette;
-      const byPal = { ...(cur.overridesByPalette || {}) };
-      byPal[p] = {};
-      return { ...prev, [templateKey]: { ...cur, overridesByPalette: byPal } };
-    });
     if (isCurrentPageEditable()) {
       setPages(prev => {
         if (currentPageIdx < 0 || currentPageIdx >= prev.length) return prev;
@@ -651,10 +648,18 @@ function App() {
         next[currentPageIdx] = { ...cur, data: { ...cur.data, overridesByPalette: byPal } };
         return next;
       });
+    } else {
+      setAllData(prev => {
+        const cur = prev[templateKey];
+        const p = cur.palette;
+        const byPal = { ...(cur.overridesByPalette || {}) };
+        byPal[p] = {};
+        return { ...prev, [templateKey]: { ...cur, overridesByPalette: byPal } };
+      });
     }
   };
 
-  // 切版型按鈕的包裝：切到不同 template 時自動脫離正在編輯的頁面（防雙寫汙染）
+  // 切版型時自動脫離綁定（避免 currentPageIdx 指向不同 template 的頁）
   const handleSetTemplateKey = (key) => {
     setTemplateKey(key);
     if (currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template !== key) {
@@ -672,18 +677,24 @@ function App() {
       return { ...p, data: { ...p.data, number: String(counter).padStart(2, '0') } };
     });
   };
-  const snapshotCurrent = () => ({
-    template: templateKey,
-    data: JSON.parse(JSON.stringify(allData[templateKey])),
-  });
+  // v3 清潔版：snapshot 從正確 source 取（綁定中→從 pages[idx]；未綁定→從 allData）
+  const snapshotCurrent = () => {
+    const source = (currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template === templateKey)
+      ? pages[currentPageIdx].data
+      : allData[templateKey];
+    return {
+      template: templateKey,
+      data: JSON.parse(JSON.stringify(source)),
+    };
+  };
   const addCurrentToPages = () => {
-    setPages(prev => {
-      const next = renumberInnerPages([...prev, snapshotCurrent()]);
-      setCurrentPageIdx(next.length - 1);
-      return next;
-    });
+    setPages(prev => renumberInnerPages([...prev, snapshotCurrent()]));
+    // 加完後脫離綁定，讓使用者繼續編輯（做下一張類似的）不會汙染剛加的頁
+    // 要修剛加的頁 → 點 pages 清單最後一個切回編輯模式
+    setCurrentPageIdx(-1);
   };
   const updateCurrentPage = () => {
+    // v3 下編輯直接改 pages，此函數保留但實際用不到（UI 已移除覆寫按鈕）
     if (currentPageIdx < 0) return;
     setPages(prev => {
       const next = [...prev];
@@ -691,11 +702,11 @@ function App() {
       return renumberInnerPages(next);
     });
   };
+  // v3 清潔版：只設 templateKey + currentPageIdx；data 會從 pages[idx].data 讀（不動 allData）
   const loadPage = (idx) => {
     const page = pages[idx];
     if (!page) return;
     setTemplateKey(page.template);
-    setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
     setCurrentPageIdx(idx);
   };
   const removePage = (idx) => {
