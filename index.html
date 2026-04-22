@@ -156,13 +156,13 @@ async function exportToPng(node, opts) {
 
 const DEFAULTS = {
   cover: { contentOffsetY: 0,    chipSize: 32, titleSize: 170, titleSize_1x1: 150, subtitleSize: 40, hintSize: 34, buttonBgOpacity: 0.3,
-           chipFont: 'huninn', titleFont: 'huninn', subtitleFont: 'huninn', hintFont: 'huninn', pageNumFont: 'jost',
+           chipFont: 'chiron', titleFont: 'chiron', subtitleFont: 'chiron', hintFont: 'chiron', pageNumFont: 'jost',
            chipWeight: 500, titleWeight: 900, subtitleWeight: 400, hintWeight: 500 },
   inner: { contentOffsetY: -400, numberSize: 280, chipSize: 30, titleSize: 92, bodySize: 38, footerTextSize: 30, pageNumSize: 28,
-           numberFont: 'huninn', chipFont: 'huninn', titleFont: 'huninn', bodyFont: 'huninn', footerFont: 'huninn', pageNumFont: 'jost',
+           numberFont: 'chiron', chipFont: 'chiron', titleFont: 'chiron', bodyFont: 'chiron', footerFont: 'chiron', pageNumFont: 'jost',
            numberWeight: 900, chipWeight: 500, titleWeight: 900, bodyWeight: 400, footerWeight: 500, pageNumWeight: 500 },
   cta:   { contentOffsetY: 280,  decorSize: 380, decorOpacity: 0.22, decorTop: 180, titleSize: 130, bodySize: 44, taglineSize: 34, buttonSize: 38, buttonBgOpacity: 0.5, footerTextSize: 30, pageNumSize: 28,
-           decorFont: 'nunito', titleFont: 'huninn', bodyFont: 'huninn', taglineFont: 'huninn', buttonFont: 'huninn', footerFont: 'huninn', pageNumFont: 'jost',
+           decorFont: 'nunito', titleFont: 'chiron', bodyFont: 'chiron', taglineFont: 'chiron', buttonFont: 'chiron', footerFont: 'chiron', pageNumFont: 'jost',
            decorWeight: 900, titleWeight: 900, bodyWeight: 400, taglineWeight: 400, buttonWeight: 500, footerWeight: 500, pageNumWeight: 500 },
 };
 
@@ -466,7 +466,7 @@ function CTACard({ data, size, palette, logos }) {
 
 const TEMPLATES = {
   cover: { name: 'Cover 封面', component: CoverCard, defaultPalette: '經典橘' },
-  inner: { name: '內頁',       component: InnerCard, defaultPalette: '奶白' },
+  inner: { name: '內頁',       component: InnerCard, defaultPalette: '經典橘' },
   cta:   { name: 'CTA 行動頁', component: CTACard,   defaultPalette: '經典橘' },
 };
 
@@ -481,7 +481,7 @@ const DEFAULT_DATA = {
     chip: '小遊戲 · 3 分鐘', pageNum: '02 / 06',
     number: '01', title: '用手指當小火車',
     body: '讓孩子的手指先走過那一行，\n眼睛才跟上。\n幾天之後，手指可以拿掉了。',
-    palette: '奶白', overridesByPalette: {},
+    palette: '經典橘', overridesByPalette: {},
   },
   cta: {
     pageNum: '06 / 06', decor: 'READ',
@@ -561,6 +561,12 @@ function App() {
   const [uploading, setUploading]   = useState(false);
   const [uploadedUrl, setUploadedUrl] = useState('');
   const [copied, setCopied]         = useState(false);
+  // 多頁清單 state（階段 D）
+  const [pages, setPages] = useState([]); // [{ template, data }]
+  const [currentPageIdx, setCurrentPageIdx] = useState(-1); // -1 = 沒選頁
+  const [batchExporting, setBatchExporting] = useState(false);
+  const [batchUploading, setBatchUploading] = useState(false);
+  const [batchUrls, setBatchUrls] = useState([]);
   const unlocked = adminInput !== '' && adminInput === ADMIN_PASSWORD && ADMIN_PASSWORD !== '__PLACEHOLDER_PASSWORD__';
   const canvasRef = useRef(null);
   const uploadWidgetRef = useRef(null);
@@ -605,6 +611,228 @@ function App() {
       byPal[p] = {};
       return { ...prev, [templateKey]: { ...cur, overridesByPalette: byPal } };
     });
+  };
+
+  // ─── 多頁清單 helpers（階段 D）─────────────────────
+  // 內頁編號自動算（每次 pages 異動都跑一次）
+  const renumberInnerPages = (arr) => {
+    let counter = 0;
+    return arr.map(p => {
+      if (p.template !== 'inner') return p;
+      counter += 1;
+      return { ...p, data: { ...p.data, number: String(counter).padStart(2, '0') } };
+    });
+  };
+  const snapshotCurrent = () => ({
+    template: templateKey,
+    data: JSON.parse(JSON.stringify(allData[templateKey])),
+  });
+  const addCurrentToPages = () => {
+    setPages(prev => {
+      const next = renumberInnerPages([...prev, snapshotCurrent()]);
+      setCurrentPageIdx(next.length - 1);
+      return next;
+    });
+  };
+  const updateCurrentPage = () => {
+    if (currentPageIdx < 0) return;
+    setPages(prev => {
+      const next = [...prev];
+      next[currentPageIdx] = snapshotCurrent();
+      return renumberInnerPages(next);
+    });
+  };
+  const loadPage = (idx) => {
+    const page = pages[idx];
+    if (!page) return;
+    setTemplateKey(page.template);
+    setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+    setCurrentPageIdx(idx);
+  };
+  const removePage = (idx) => {
+    setPages(prev => {
+      const next = renumberInnerPages(prev.filter((_, i) => i !== idx));
+      if (currentPageIdx === idx) setCurrentPageIdx(-1);
+      else if (currentPageIdx > idx) setCurrentPageIdx(currentPageIdx - 1);
+      return next;
+    });
+  };
+  const clearPages = () => {
+    if (!confirm(`清空全部 ${pages.length} 頁？`)) return;
+    setPages([]);
+    setCurrentPageIdx(-1);
+    setBatchUrls([]);
+  };
+
+  // 批次上雲 helper：直接 POST Cloudinary REST API（不用 Widget 彈框）
+  const uploadOneToCloudinary = async (blob, fileName) => {
+    const formData = new FormData();
+    formData.append('file', blob, fileName);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    formData.append('folder', 'social-publisher/ofp-images');
+    const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Cloudinary HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    return data.secure_url;
+  };
+
+  // 批次上雲（階段 D-3）
+  const uploadAllToCloudinary = async () => {
+    if (pages.length === 0) return;
+    if (!unlocked) { alert('請先輸入管理員密碼解鎖'); return; }
+    if (!CLOUD_UPLOAD_READY) { alert('雲端未設定：config.js 缺項'); return; }
+    setBatchUploading(true);
+    setBatchUrls([]);
+    const originalIdx = currentPageIdx;
+    const collected = [];
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(i);
+        await new Promise(r => setTimeout(r, 800));
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+
+        const node = canvasRef.current;
+        if (!node) throw new Error(`第 ${i + 1} 頁 canvas 未準備好`);
+        const originalTransform = node.style.transform;
+        const originalTransformOrigin = node.style.transformOrigin;
+        node.style.transform = 'none';
+        node.style.transformOrigin = 'top left';
+        await new Promise(r => setTimeout(r, 200));
+        const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
+        node.style.transform = originalTransform;
+        node.style.transformOrigin = originalTransformOrigin;
+
+        const blob = await (await fetch(dataUrl)).blob();
+        if (blob.size > 5 * 1024 * 1024) {
+          throw new Error(`第 ${i + 1} 頁 ${(blob.size/1024/1024).toFixed(2)}MB > 5MB 上限`);
+        }
+        const numStr = String(i + 1).padStart(2, '0');
+        const fileName = `OFP_p${numStr}_${page.template}_${sizeKey.replace(':','x')}_${Date.now()}.png`;
+        const url = await uploadOneToCloudinary(blob, fileName);
+        collected.push(url);
+        setBatchUrls([...collected]); // 即時更新 UI
+      }
+      alert(`✓ 全部 ${pages.length} 頁上傳完成`);
+    } catch (err) {
+      console.error('批次上傳失敗', err);
+      alert(`批次上傳第 ${collected.length + 1} 頁失敗：${err.message || err}\n已成功 ${collected.length} 頁。`);
+    } finally {
+      setBatchUploading(false);
+      if (originalIdx >= 0 && pages[originalIdx]) {
+        const page = pages[originalIdx];
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(originalIdx);
+      }
+    }
+  };
+
+  const copyAllUrls = () => {
+    if (batchUrls.length === 0) return;
+    navigator.clipboard.writeText(batchUrls.join('\n'));
+    alert(`已複製 ${batchUrls.length} 個 URL 到剪貼簿`);
+  };
+
+  // 階段 E：產出本機分享網址（給 push-social-to-notion 寫入 Notion 用）
+  const buildShareUrl = () => {
+    if (pages.length === 0) return '';
+    const payload = { pages: pages.map(p => ({ template: p.template, data: p.data })) };
+    const json = JSON.stringify(payload);
+    const b64 = btoa(unescape(encodeURIComponent(json))); // UTF-8 safe
+    const baseUrl = window.location.href.split('?')[0];
+    return `${baseUrl}?d=${b64}`;
+  };
+  const copyShareUrl = () => {
+    const url = buildShareUrl();
+    if (!url) { alert('清單是空的'); return; }
+    navigator.clipboard.writeText(url);
+    alert(`預填網址已複製（${url.length} 字元）`);
+  };
+
+  // 階段 E：啟動時解析 URL 參數 ?d=<base64> 自動載入 pages
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dParam = params.get('d');
+    if (!dParam) return;
+    try {
+      const json = decodeURIComponent(escape(atob(dParam)));
+      const decoded = JSON.parse(json);
+      if (!Array.isArray(decoded.pages)) return;
+      const validPages = decoded.pages
+        .filter(p => p && p.template && TEMPLATES[p.template] && p.data && typeof p.data === 'object')
+        .map(p => ({
+          template: p.template,
+          data: { ...DEFAULT_DATA[p.template], ...p.data, overridesByPalette: p.data.overridesByPalette || {} },
+        }));
+      if (validPages.length === 0) return;
+      const renumbered = renumberInnerPages(validPages);
+      setPages(renumbered);
+      const first = renumbered[0];
+      setTemplateKey(first.template);
+      setAllData(prev => ({ ...prev, [first.template]: JSON.parse(JSON.stringify(first.data)) }));
+      setCurrentPageIdx(0);
+      console.log(`[OFP] URL 預填載入 ${renumbered.length} 頁`);
+    } catch (e) {
+      console.warn('[OFP] URL 預填解析失敗:', e);
+    }
+  }, []); // 只在初始化跑一次
+
+  // 批次匯出 PNG（階段 D-2）
+  const exportAllPng = async () => {
+    if (pages.length === 0) return;
+    setBatchExporting(true);
+    const originalIdx = currentPageIdx;
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        // 載入該頁進編輯區（觸發 React re-render）
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(i);
+        // 等 React commit + 字型載入
+        await new Promise(r => setTimeout(r, 800));
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+
+        const node = canvasRef.current;
+        if (!node) throw new Error(`第 ${i + 1} 頁 canvas 未準備好`);
+        const originalTransform = node.style.transform;
+        const originalTransformOrigin = node.style.transformOrigin;
+        node.style.transform = 'none';
+        node.style.transformOrigin = 'top left';
+        await new Promise(r => setTimeout(r, 200));
+        const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
+        node.style.transform = originalTransform;
+        node.style.transformOrigin = originalTransformOrigin;
+
+        const numStr = String(i + 1).padStart(2, '0');
+        const link = document.createElement('a');
+        link.download = `OFP_p${numStr}_${page.template}_${sizeKey.replace(':','x')}_${Date.now()}.png`;
+        link.href = dataUrl;
+        link.click();
+        await new Promise(r => setTimeout(r, 400)); // 給瀏覽器喘息
+      }
+    } catch (err) {
+      console.error('批次匯出失敗', err);
+      alert('批次匯出失敗：' + (err.message || err));
+    } finally {
+      setBatchExporting(false);
+      // 恢復原本選的頁
+      if (originalIdx >= 0 && pages[originalIdx]) {
+        const page = pages[originalIdx];
+        setTemplateKey(page.template);
+        setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
+        setCurrentPageIdx(originalIdx);
+      }
+    }
   };
 
   const [maxPreview, setMaxPreview] = useState({ w: 520, h: 700 });
@@ -1006,6 +1234,120 @@ function App() {
 
       <div className="flex flex-col-reverse md:flex-row" style={{ minHeight: 'calc(100vh - 68px)' }}>
         <aside className="w-full md:w-[380px] p-4 md:p-6 bg-white md:border-r border-t md:border-t-0 md:overflow-y-auto no-scrollbar md:max-h-[calc(100vh-68px)]" style={{ borderColor: '#e7e5e4' }}>
+          {/* 多頁清單（階段 D）*/}
+          <div className="mb-6 pb-5 border-b" style={{ borderColor: '#f1ece8' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.brown }}>
+                ✦ 多頁清單 ({pages.length})
+              </span>
+              {pages.length > 0 && (
+                <button onClick={clearPages} className="text-[10px] underline" style={{ color: C.rosePink }}>清空</button>
+              )}
+            </div>
+            <div className="flex gap-2 mb-2">
+              <button onClick={addCurrentToPages}
+                className="flex-1 px-2 py-2 text-xs font-semibold rounded-lg transition"
+                style={{ background: C.orange, color: '#fff' }}>
+                + 加新頁
+              </button>
+              <button onClick={updateCurrentPage} disabled={currentPageIdx < 0}
+                className="flex-1 px-2 py-2 text-xs font-semibold rounded-lg transition"
+                style={{
+                  background: currentPageIdx >= 0 ? C.brown : C.subBg,
+                  color: currentPageIdx >= 0 ? '#fff' : C.brown,
+                  opacity: currentPageIdx < 0 ? 0.4 : 1,
+                  cursor: currentPageIdx < 0 ? 'not-allowed' : 'pointer',
+                }}>
+                {currentPageIdx >= 0 ? `↻ 覆寫第 ${currentPageIdx + 1} 頁` : '↻ 覆寫本頁'}
+              </button>
+            </div>
+            {pages.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {pages.map((p, i) => {
+                  const tplName = TEMPLATES[p.template]?.name || p.template;
+                  const num = p.data.number ? `(${p.data.number})` : '';
+                  const isActive = currentPageIdx === i;
+                  return (
+                    <div key={i} className="flex items-center gap-1">
+                      <button onClick={() => loadPage(i)}
+                        className="flex-1 text-left px-2 py-1.5 text-xs rounded transition truncate"
+                        style={{
+                          background: isActive ? C.brown : C.subBg,
+                          color: isActive ? '#fff' : C.brown,
+                          fontWeight: isActive ? 600 : 400,
+                        }}
+                        title={`點擊載入第 ${i + 1} 頁`}>
+                        #{i + 1} {tplName} {num}
+                      </button>
+                      <button onClick={() => removePage(i)}
+                        className="px-2 py-1 text-xs rounded transition"
+                        style={{ color: C.rosePink, background: 'transparent' }}
+                        title="移除這頁">✘</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {pages.length === 0 && (
+              <div className="text-[11px] text-center py-2" style={{ color: '#a8a29e' }}>
+                編輯目前畫面 → 按「+ 加新頁」加入清單
+              </div>
+            )}
+            {pages.length > 0 && (
+              <div className="mt-3 pt-3 border-t space-y-2" style={{ borderColor: '#f1ece8' }}>
+                <div className="flex gap-2">
+                  <button onClick={exportAllPng} disabled={batchExporting || batchUploading}
+                    className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg transition"
+                    style={{
+                      background: C.brown, color: '#fff',
+                      opacity: (batchExporting || batchUploading) ? 0.5 : 1,
+                      cursor: (batchExporting || batchUploading) ? 'not-allowed' : 'pointer',
+                    }}>
+                    {batchExporting ? `匯出中… (${pages.length})` : `↓ 全部 PNG (${pages.length})`}
+                  </button>
+                  {unlocked && (
+                    <button onClick={uploadAllToCloudinary} disabled={batchExporting || batchUploading}
+                      className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg transition"
+                      style={{
+                        background: C.orange, color: '#fff',
+                        opacity: (batchExporting || batchUploading) ? 0.5 : 1,
+                        cursor: (batchExporting || batchUploading) ? 'not-allowed' : 'pointer',
+                      }}>
+                      {batchUploading ? `上雲中… (${batchUrls.length}/${pages.length})` : `↑ 全部上雲 (${pages.length})`}
+                    </button>
+                  )}
+                </div>
+                <button onClick={copyShareUrl}
+                  className="w-full px-3 py-1.5 text-[11px] font-medium rounded-lg transition border"
+                  style={{ background: '#fff', color: C.brown, borderColor: '#e7e5e4' }}
+                  title="複製能還原此清單的網址（給橡果/push-social-to-notion 用）">
+                  ⧉ 複製預填網址（含全部 {pages.length} 頁）
+                </button>
+                {batchUrls.length > 0 && (
+                  <div className="rounded-lg p-2" style={{ background: C.subBg }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-semibold" style={{ color: C.brown }}>
+                        ✓ 已上傳 {batchUrls.length} 個 URL
+                      </span>
+                      <button onClick={copyAllUrls}
+                        className="px-2 py-0.5 text-[10px] font-semibold rounded-full transition"
+                        style={{ background: C.orange, color: '#fff' }}>
+                        複製全部
+                      </button>
+                    </div>
+                    <div className="space-y-0.5 max-h-32 overflow-y-auto no-scrollbar">
+                      {batchUrls.map((url, i) => (
+                        <div key={i} className="text-[10px] truncate font-mono" style={{ color: C.brown }} title={url}>
+                          #{String(i + 1).padStart(2, '0')} {url}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="mb-6">
             <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: C.brown }}>版型</div>
             <div className="grid grid-cols-3 gap-2">
