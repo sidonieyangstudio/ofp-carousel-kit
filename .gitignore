@@ -3,6 +3,9 @@
 .env
 .env.local
 
+# 本機設定（含 Cloudinary 憑證與管理員密碼，勿 commit）
+config.js
+
 # 授權未明字型（勿公開）
 fonts/Soomedium-Regular.ttf
 
