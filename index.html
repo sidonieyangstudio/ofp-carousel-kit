@@ -725,6 +725,23 @@ function App() {
     setBatchUrls([]);
   };
 
+  // 2026-04-22 加：一鍵建立測試範例 4 張（cover + 2 inner + cta，全 default）
+  // 用途：讓 Sidonie 驗證工具本身有無 bug（獨立於她過去的操作汙染）
+  const loadDemoPages = () => {
+    if (pages.length > 0 && !confirm(`將覆蓋目前 ${pages.length} 頁清單，建立 4 張測試範例頁。確定？`)) return;
+    const demoPages = [
+      { template: 'cover', data: JSON.parse(JSON.stringify(DEFAULT_DATA.cover)) },
+      { template: 'inner', data: JSON.parse(JSON.stringify(DEFAULT_DATA.inner)) },
+      { template: 'inner', data: JSON.parse(JSON.stringify(DEFAULT_DATA.inner)) },
+      { template: 'cta',   data: JSON.parse(JSON.stringify(DEFAULT_DATA.cta)) },
+    ];
+    const renumbered = renumberInnerPages(demoPages);
+    setPages(renumbered);
+    setCurrentPageIdx(-1);
+    setBatchUrls([]);
+    setTemplateKey('cover');
+  };
+
   // 重設當前畫面到 default（當綁定頁→重設 pages[idx]；未綁定→重設 allData[template]）
   const resetCurrentToDefault = () => {
     const freshData = JSON.parse(JSON.stringify(DEFAULT_DATA[templateKey]));
@@ -1334,6 +1351,12 @@ function App() {
                 <button onClick={clearPages} className="text-[10px] underline" style={{ color: C.rosePink }}>清空</button>
               )}
             </div>
+            <button onClick={loadDemoPages}
+              className="w-full px-2 py-1.5 text-[11px] font-medium rounded-lg transition border mb-2"
+              style={{ background: '#fff', color: C.brown, borderColor: C.orange }}
+              title="一鍵建立 4 張測試範例頁（cover + 2 inner + cta，全 default）">
+              ✦ 一鍵測試範例（4 張 default）
+            </button>
             <div className="flex gap-2 mb-2">
               <button onClick={addCurrentToPages}
                 className="flex-1 px-2 py-2 text-xs font-semibold rounded-lg transition"
