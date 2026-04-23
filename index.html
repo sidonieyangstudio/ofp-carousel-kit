@@ -725,6 +725,23 @@ function App() {
     setBatchUrls([]);
   };
 
+  // 重設當前畫面到 default（當綁定頁→重設 pages[idx]；未綁定→重設 allData[template]）
+  const resetCurrentToDefault = () => {
+    const freshData = JSON.parse(JSON.stringify(DEFAULT_DATA[templateKey]));
+    if (isCurrentPageEditable()) {
+      setPages(prev => {
+        if (currentPageIdx < 0 || currentPageIdx >= prev.length) return prev;
+        const cur = prev[currentPageIdx];
+        if (cur.template !== templateKey) return prev;
+        const next = [...prev];
+        next[currentPageIdx] = { ...cur, data: freshData };
+        return renumberInnerPages(next);
+      });
+    } else {
+      setAllData(prev => ({ ...prev, [templateKey]: freshData }));
+    }
+  };
+
   // 批次上雲 helper：直接 POST Cloudinary REST API（不用 Widget 彈框）
   const uploadOneToCloudinary = async (blob, fileName) => {
     const formData = new FormData();
@@ -837,6 +854,16 @@ function App() {
           data: { ...DEFAULT_DATA[p.template], ...p.data, overridesByPalette: p.data.overridesByPalette || {} },
         }));
       if (validPages.length === 0) return;
+
+      // 防呆：如果某頁主要欄位都空（title/body/subtitle/chip/hint 都沒值），可能是舊 bug 產的空資料 → 警告 + 忽略
+      const anyEmpty = validPages.some(p => {
+        const d = p.data || {};
+        return !d.title && !d.body && !d.subtitle && !d.chip && !d.hint;
+      });
+      if (anyEmpty) {
+        const keepOrSkip = confirm('[URL 預填] 偵測到某頁主要欄位都是空的（可能是舊 bug 產的壞資料）。\n\n按「確定」仍要載入；按「取消」忽略 URL 預填使用預設範本。');
+        if (!keepOrSkip) return;
+      }
       const renumbered = renumberInnerPages(validPages);
       setPages(renumbered);
       const first = renumbered[0];
@@ -1307,11 +1334,19 @@ function App() {
                 <button onClick={clearPages} className="text-[10px] underline" style={{ color: C.rosePink }}>清空</button>
               )}
             </div>
-            <button onClick={addCurrentToPages}
-              className="w-full px-2 py-2 text-xs font-semibold rounded-lg transition mb-2"
-              style={{ background: C.orange, color: '#fff' }}>
-              + 加新頁（目前畫面複製成新頁面）
-            </button>
+            <div className="flex gap-2 mb-2">
+              <button onClick={addCurrentToPages}
+                className="flex-1 px-2 py-2 text-xs font-semibold rounded-lg transition"
+                style={{ background: C.orange, color: '#fff' }}>
+                + 加新頁
+              </button>
+              <button onClick={resetCurrentToDefault}
+                className="px-2 py-2 text-xs font-semibold rounded-lg transition border"
+                style={{ background: '#fff', color: C.brown, borderColor: '#e7e5e4' }}
+                title="把畫面回到預設範本（如果誤改或空白可救）">
+                ↺ 重設
+              </button>
+            </div>
             {pages.length > 0 && currentPageIdx >= 0 && pages[currentPageIdx] && pages[currentPageIdx].template === templateKey && (
               <div className="text-[10px] text-center py-1 mb-2 rounded"
                 style={{ background: C.orange, color: '#fff' }}>
