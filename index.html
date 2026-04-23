@@ -129,6 +129,48 @@ async function svgToPng(svgDataUrl, size) {
   });
 }
 
+// 2026-04-22：Chiron GoRound TC 來自 Google Fonts CDN，modern-screenshot 讀 cross-origin CSS
+// cssRules 被瀏覽器 CORS 擋（SecurityError）→ 字型無法 inline 進 SVG foreignObject → PNG 空白。
+// 解法：export 前動態 fetch 只含當前 DOM 文字的 subset CSS（text= API）+ fetch woff2 + base64
+// + inject 成 same-origin `<style id="chiron-inlined">`。modern-screenshot 讀這個 style 的 cssRules 拿到 data URI
+// 直接用。整個流程 same-origin 無 CORS。
+async function inlineChironForExport(rootNode) {
+  try {
+    // 蒐集當前 DOM 所有字元（去重）
+    const text = [...new Set((rootNode.innerText || '').replace(/\s+/g, ''))].join('');
+    if (!text) return;
+    const url = `https://fonts.googleapis.com/css2?family=Chiron+GoRound+TC:wght@400;500;700;900&text=${encodeURIComponent(text)}&display=swap`;
+    const css = await fetch(url).then(r => { if (!r.ok) throw new Error('CSS fetch HTTP '+r.status); return r.text(); });
+    const urlRe = /url\(([^)]+)\)/g;
+    const urls = [...new Set([...css.matchAll(urlRe)].map(m => m[1].replace(/^["']|["']$/g, '')))];
+    const dataUris = await Promise.all(urls.map(async u => {
+      const resp = await fetch(u);
+      if (!resp.ok) throw new Error(`woff2 fetch HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve([u, reader.result]);
+        reader.readAsDataURL(blob);
+      });
+    }));
+    let inlined = css;
+    for (const [u, dataUri] of dataUris) {
+      inlined = inlined.split(u).join(dataUri);
+    }
+    let styleEl = document.getElementById('chiron-inlined');
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'chiron-inlined';
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = inlined;
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    console.log(`[Chiron inline] 字元數=${text.length} woff2 數=${urls.length} CSS 大小=${inlined.length} chars`);
+  } catch (e) {
+    console.warn('[Chiron inline] 失敗，走 fallback（畫面可能用 system fallback）:', e);
+  }
+}
+
 // 匯出 — 優先 modern-screenshot，fallback dom-to-image-more
 async function exportToPng(node, opts) {
   const { width, height, scale } = opts;
@@ -809,7 +851,8 @@ function App() {
         node.style.transformOrigin = 'top left';
         await new Promise(r => setTimeout(r, 400));
         void node.getBoundingClientRect();
-        const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
+        await inlineChironForExport(node);
+      const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
         node.style.transform = originalTransform;
         node.style.transformOrigin = originalTransformOrigin;
 
@@ -921,7 +964,8 @@ function App() {
         node.style.transform = 'none';
         node.style.transformOrigin = 'top left';
         await new Promise(r => setTimeout(r, 200));
-        const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
+        await inlineChironForExport(node);
+      const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
         node.style.transform = originalTransform;
         node.style.transformOrigin = originalTransformOrigin;
 
@@ -980,6 +1024,7 @@ function App() {
       if (document.fonts && document.fonts.ready) await document.fonts.ready;
       await new Promise(r => setTimeout(r, 300));
 
+      await inlineChironForExport(node);
       const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
 
       node.style.transform = originalTransform;
@@ -1020,6 +1065,7 @@ function App() {
       node.style.transformOrigin = 'top left';
       if (document.fonts && document.fonts.ready) await document.fonts.ready;
       await new Promise(r => setTimeout(r, 300));
+      await inlineChironForExport(node);
       const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
       node.style.transform = originalTransform;
       node.style.transformOrigin = originalTransformOrigin;
