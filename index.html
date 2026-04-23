@@ -792,18 +792,23 @@ function App() {
         setTemplateKey(page.template);
         setAllData(prev => ({ ...prev, [page.template]: JSON.parse(JSON.stringify(page.data)) }));
         setCurrentPageIdx(i);
-        // 等待 React commit + layout + paint 完成（raf 雙層 + 1200ms 緩衝；首次 iter 特別給更多時間）
-        await new Promise(r => setTimeout(r, i === 0 ? 1500 : 1200));
+        // 等待 React commit + layout + paint 完成
+        await new Promise(r => setTimeout(r, i === 0 ? 2500 : 1500));
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
         if (document.fonts && document.fonts.ready) await document.fonts.ready;
 
         const node = canvasRef.current;
         if (!node) throw new Error(`第 ${i + 1} 頁 canvas 未準備好`);
+        // Force reflow：確保 browser 完成 layout
+        void node.getBoundingClientRect();
+        // DEBUG：印 innerText 前 120 字到 console，幫判斷 DOM 是否有內容
+        console.log(`[OFP export #${String(i + 1).padStart(2, '0')}] template=${page.template} innerText="${(node.innerText || '').replace(/\s+/g, ' ').substring(0, 120)}"`);
         const originalTransform = node.style.transform;
         const originalTransformOrigin = node.style.transformOrigin;
         node.style.transform = 'none';
         node.style.transformOrigin = 'top left';
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 400));
+        void node.getBoundingClientRect();
         const dataUrl = await exportToPng(node, { width: size.w, height: size.h, scale: 2 });
         node.style.transform = originalTransform;
         node.style.transformOrigin = originalTransformOrigin;
